@@ -91,6 +91,16 @@ def set_rust_ocr(
             _OCR.asynchronous.override(asynchronous)
 
 
+def supports_callback_adapter(*, asynchronous: bool = False) -> bool:
+    binding = _OCR.asynchronous if asynchronous else _OCR.sync
+    if binding.is_overridden():
+        return False
+    from litellm.rust_bridge import get_native_bridge
+
+    native: Final = get_native_bridge()
+    return native is not None and hasattr(native, "__ocr_callback_runtime__")
+
+
 def dispatch_ocr(
     *,
     prepare: Callable[[], NativeOCRRequest],
