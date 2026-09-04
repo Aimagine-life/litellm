@@ -1,7 +1,7 @@
-use litellm_core::Error;
 use std::future::Future;
 
-use litellm_ai_gateway::io::ocr::{OcrRequest, ocr as run_ocr};
+use litellm_core::Error;
+use litellm_core::ocr::{OcrRequest, ocr as run_ocr};
 use pyo3::prelude::*;
 use serde_json::Value;
 
@@ -40,10 +40,6 @@ fn prepare_ocr(
             extra_headers,
             optional_params,
             timeout,
-            callbacks: Vec::new(),
-            guardrails: Vec::new(),
-            request_metadata: Default::default(),
-            litellm_call_id: None,
         })
         .await
     })

@@ -571,6 +571,19 @@ def test_ocr_routes_azure_ai_to_rust_when_enabled(fake_bridge):
     assert fake_bridge.calls[0]["custom_llm_provider"] == "azure_ai"
 
 
+def test_ocr_routes_reducto_to_rust_when_enabled(fake_bridge):
+    response = litellm.ocr(
+        model="reducto/parse-v3",
+        document=DOCUMENT,
+        api_key="sk-test",
+    )
+
+    assert isinstance(response, OCRResponse)
+    assert len(fake_bridge.calls) == 1
+    assert fake_bridge.calls[0]["model"] == "parse-v3"
+    assert fake_bridge.calls[0]["custom_llm_provider"] == "reducto"
+
+
 def test_ocr_rust_path_converts_file_document_before_bridge(fake_bridge):
     response = litellm.ocr(
         model=MODEL,
