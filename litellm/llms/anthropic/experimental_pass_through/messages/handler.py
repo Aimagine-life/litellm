@@ -671,6 +671,13 @@ def anthropic_messages_handler(  # noqa: C901  # dispatch preserves the provider
 
     raw_override: Final = litellm_params.get("rust")
     request_override: Final = raw_override if isinstance(raw_override, bool) else None
+    from litellm.rust_bridge.callback_adapters import ProviderLoggingAdapter
+
+    callback_adapter: Final = ProviderLoggingAdapter(
+        logging_obj=litellm_logging_obj,
+        input=messages,
+        api_key=api_key or "",
+    )
     eligible: Final = (
         custom_llm_provider in ("anthropic", "azure_ai")
         and not stream
@@ -695,6 +702,7 @@ def anthropic_messages_handler(  # noqa: C901  # dispatch preserves the provider
                 stream=bool(stream),
                 custom_llm_provider=custom_llm_provider,
             ),
+            callback_adapter=callback_adapter,
         )
 
     if is_async:

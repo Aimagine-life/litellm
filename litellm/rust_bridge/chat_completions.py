@@ -13,6 +13,7 @@ from ..litellm_core_utils.llm_response_utils.convert_dict_to_response import (
 )
 from ..types.utils import ModelResponse
 from .bindings import UNCHANGED, Unchanged
+from .callbacks import OneShotCallbackHandle
 from .configuration import rust_enabled
 from .runtime import BridgeErrorContext, EndpointDispatch
 from .timeouts import timeout_to_seconds
@@ -38,6 +39,7 @@ class NativeChatCompletionsRequest:
     extra_headers: Mapping[str, object] | None
     timeout: float | httpx.Timeout | None
     request_context: NativeChatContext
+    callback_adapter: OneShotCallbackHandle
 
 
 class RustChatCompletions(Protocol):
@@ -53,6 +55,7 @@ class RustChatCompletions(Protocol):
         extra_headers: Mapping[str, object] | None,
         timeout_seconds: float | None,
         request_context: NativeChatContext,
+        callback_adapter: OneShotCallbackHandle,
     ) -> Mapping[str, object]: ...
 
 
@@ -69,6 +72,7 @@ class RustAchatCompletions(Protocol):
         extra_headers: Mapping[str, object] | None,
         timeout_seconds: float | None,
         request_context: NativeChatContext,
+        callback_adapter: OneShotCallbackHandle,
     ) -> Awaitable[Mapping[str, object]]: ...
 
 
@@ -172,6 +176,7 @@ def _call_chat_completions(
         extra_headers=request.extra_headers,
         timeout_seconds=timeout_to_seconds(request.timeout),
         request_context=request.request_context,
+        callback_adapter=request.callback_adapter,
     )
 
 
@@ -189,4 +194,5 @@ def _call_achat_completions(
         extra_headers=request.extra_headers,
         timeout_seconds=timeout_to_seconds(request.timeout),
         request_context=request.request_context,
+        callback_adapter=request.callback_adapter,
     )

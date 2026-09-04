@@ -8,6 +8,7 @@ import pytest
 import litellm
 from litellm.rust_bridge import bindings, configuration
 from litellm.rust_bridge import chat_completions as bridge
+from litellm.rust_bridge.callbacks import OneShotCallbackHandle
 from litellm.types.utils import ModelResponse
 
 RUST_RESPONSE: Final[dict[str, object]] = {
@@ -66,6 +67,7 @@ class RecordingCall:
         extra_headers: Mapping[str, object] | None,
         timeout_seconds: float | None,
         request_context: bridge.NativeChatContext,
+        callback_adapter: OneShotCallbackHandle,
     ) -> Mapping[str, object]:
         self.calls.append(
             {
@@ -78,6 +80,33 @@ class RecordingCall:
                 "extra_headers": extra_headers,
                 "timeout_seconds": timeout_seconds,
                 "request_context": request_context,
+            }
+        )
+        callback_adapter.pre_call(
+            {
+                "provider": custom_llm_provider or "anthropic",
+                "model": model,
+                "call_id": "native-test",
+                "trace_id": None,
+                "attempt": 1,
+                "started_at": 1.0,
+                "request": {"model": model, "messages": messages},
+                "api_base": api_base or "",
+                "headers": extra_headers or {},
+            }
+        )
+        callback_adapter.post_call(
+            {
+                "provider": custom_llm_provider or "anthropic",
+                "model": model,
+                "call_id": "native-test",
+                "trace_id": None,
+                "attempt": 1,
+                "started_at": 1.0,
+                "response": RUST_RESPONSE,
+                "status_code": 200,
+                "headers": {},
+                "ended_at": 2.0,
             }
         )
         return RUST_RESPONSE
@@ -96,6 +125,7 @@ class RecordingAsyncCall(RecordingCall):
         extra_headers: Mapping[str, object] | None,
         timeout_seconds: float | None,
         request_context: bridge.NativeChatContext,
+        callback_adapter: OneShotCallbackHandle,
     ) -> Mapping[str, object]:
         return super().__call__(
             model=model,
@@ -107,11 +137,30 @@ class RecordingAsyncCall(RecordingCall):
             extra_headers=extra_headers,
             timeout_seconds=timeout_seconds,
             request_context=request_context,
+            callback_adapter=callback_adapter,
         )
+
+
+class RecordingCallbacks:
+    def __init__(self, responses: list[Mapping[str, object]]) -> None:
+        self.responses: Final = responses
+
+    def pre_call(self, _payload: object, /) -> None:
+        return None
+
+    def post_call(self, payload: object, /) -> None:
+        event: Final = payload if isinstance(payload, Mapping) else {}
+        response: Final = event.get("response")
+        if isinstance(response, Mapping):
+            self.responses.append(response)
+
+    def error(self, _payload: object, /) -> None:
+        return None
 
 
 def call_kwargs(
     model_response: ModelResponse,
+    observed: list[Mapping[str, object]],
     *,
     provider: str = "anthropic",
     optional_params: Mapping[str, object] | None = None,
@@ -127,6 +176,7 @@ def call_kwargs(
         extra_headers={"x-request-id": "req-1"},
         timeout=30.0,
         request_context=REQUEST_CONTEXT,
+        callback_adapter=RecordingCallbacks(observed),
     )
     return {
         "prepare": lambda: request,
@@ -150,12 +200,13 @@ def assert_model_response(result: object, original_id: str) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", (pytest.param("sync", id="sync"), pytest.param("async", id="async")))
 async def test_dispatch_builds_model_response_and_forwards_exact_request(mode: str) -> None:
+    observed: list[Mapping[str, object]] = []
     model_response: Final = ModelResponse()
     if mode == "sync":
         native: RecordingCall = RecordingCall()
         bridge.set_rust_chat_completions(sync=native)
         result: Final = bridge.dispatch_chat_completions(
-            **call_kwargs(model_response),
+            **call_kwargs(model_response, observed),
             python_fallback=lambda: "python",
         )
     else:
@@ -166,7 +217,7 @@ async def test_dispatch_builds_model_response_and_forwards_exact_request(mode: s
             return "python"
 
         result = await bridge.adispatch_chat_completions(
-            **call_kwargs(model_response),
+            **call_kwargs(model_response, observed),
             python_fallback=fallback,
         )
 
@@ -184,6 +235,7 @@ async def test_dispatch_builds_model_response_and_forwards_exact_request(mode: s
             "request_context": REQUEST_CONTEXT,
         }
     ]
+    assert observed == [RUST_RESPONSE]
 
 
 @pytest.mark.asyncio
@@ -197,7 +249,7 @@ async def test_async_dispatch_falls_back_once_when_binding_is_unavailable(monkey
         return "python"
 
     result: Final = await bridge.adispatch_chat_completions(
-        **call_kwargs(ModelResponse()),
+        **call_kwargs(ModelResponse(), []),
         python_fallback=fallback,
     )
 
@@ -218,7 +270,7 @@ def test_provider_and_stream_compatibility_are_deferred_to_rust(
 ) -> None:
     native: Final = RecordingCall()
     bridge.set_rust_chat_completions(sync=native)
-    kwargs: Final = call_kwargs(ModelResponse(), provider=provider, optional_params=optional_params)
+    kwargs: Final = call_kwargs(ModelResponse(), [], provider=provider, optional_params=optional_params)
 
     bridge.dispatch_chat_completions(**kwargs, python_fallback=lambda: "python")
 
@@ -228,7 +280,7 @@ def test_provider_and_stream_compatibility_are_deferred_to_rust(
 def test_custom_python_client_stays_on_python_path() -> None:
     native: Final = RecordingCall()
     bridge.set_rust_chat_completions(sync=native)
-    kwargs: Final = call_kwargs(ModelResponse(), eligible=False)
+    kwargs: Final = call_kwargs(ModelResponse(), [], eligible=False)
 
     result: Final = bridge.dispatch_chat_completions(**kwargs, python_fallback=lambda: "python")
 

@@ -9,6 +9,7 @@ from typing import Final, Protocol, cast  # noqa: TID251  # runtime typing const
 import httpx
 
 from litellm.rust_bridge.bindings import UNCHANGED, Unchanged
+from litellm.rust_bridge.callbacks import OneShotCallbackHandle
 from litellm.rust_bridge.configuration import rust_enabled
 from litellm.rust_bridge.runtime import BridgeErrorContext, EndpointDispatch
 from litellm.rust_bridge.timeouts import timeout_to_seconds
@@ -24,6 +25,7 @@ class RustMessages(Protocol):
         custom_llm_provider: str | None,
         extra_headers: dict[str, object] | None,
         timeout_seconds: float | None,
+        callback_adapter: OneShotCallbackHandle | None,
     ) -> dict[str, object]:
         raise NotImplementedError
 
@@ -38,6 +40,7 @@ class RustAmessages(Protocol):
         custom_llm_provider: str | None,
         extra_headers: dict[str, object] | None,
         timeout_seconds: float | None,
+        callback_adapter: OneShotCallbackHandle | None,
     ) -> Awaitable[dict[str, object]]:
         raise NotImplementedError
 
@@ -51,6 +54,7 @@ class NativeMessagesRequest:
     custom_llm_provider: str | None
     extra_headers: dict[str, object] | None
     timeout: float | httpx.Timeout | None
+    callback_adapter: OneShotCallbackHandle
 
 
 _MESSAGES: Final = cast(  # cast-ok: generic classmethod loses the route Protocol parameters
@@ -139,6 +143,7 @@ def _call_messages(native: RustMessages, request: NativeMessagesRequest) -> dict
         custom_llm_provider=request.custom_llm_provider,
         extra_headers=request.extra_headers,
         timeout_seconds=timeout_to_seconds(request.timeout),
+        callback_adapter=request.callback_adapter,
     )
 
 
@@ -151,4 +156,5 @@ def _call_amessages(native: RustAmessages, request: NativeMessagesRequest) -> Aw
         custom_llm_provider=request.custom_llm_provider,
         extra_headers=request.extra_headers,
         timeout_seconds=timeout_to_seconds(request.timeout),
+        callback_adapter=request.callback_adapter,
     )

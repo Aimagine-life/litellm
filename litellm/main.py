@@ -5129,6 +5129,7 @@ def _dispatch_completion_to_python(  # noqa: C901  # one explicit fallback owns 
 def _dispatch_chat_completion(ctx: _CompletionDispatchContext) -> _CompletionDispatchResult:
     """Select one complete native or Python chat provider operation."""
     from litellm.rust_bridge import chat_completions as bridge
+    from litellm.rust_bridge.callback_adapters import ProviderLoggingAdapter
 
     raw_litellm_metadata: Final = ctx.litellm_params.get("litellm_metadata")
     litellm_metadata: Final = dict(raw_litellm_metadata) if isinstance(raw_litellm_metadata, dict) else None
@@ -5145,6 +5146,11 @@ def _dispatch_chat_completion(ctx: _CompletionDispatchContext) -> _CompletionDis
     )
     raw_request_override: Final = ctx.litellm_params.get("rust")
     request_override: Final = raw_request_override if isinstance(raw_request_override, bool) else None
+    callback_adapter: Final = ProviderLoggingAdapter(
+        logging_obj=ctx.logging,
+        input=ctx.messages,
+        api_key=ctx.api_key or "",
+    )
     optional_params: Final = {**ctx.optional_params, "stream": ctx.stream}  # mutable-ok: native request payload
 
     def prepare_native() -> bridge.NativeChatCompletionsRequest:
@@ -5158,6 +5164,7 @@ def _dispatch_chat_completion(ctx: _CompletionDispatchContext) -> _CompletionDis
             extra_headers=ctx.extra_headers,
             timeout=ctx.timeout if not isinstance(ctx.timeout, str) else None,
             request_context=request_context,
+            callback_adapter=callback_adapter,
         )
 
     if ctx.acompletion:
