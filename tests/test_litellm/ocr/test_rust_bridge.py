@@ -31,7 +31,9 @@ DOCUMENT: dict[str, object] = {
 def test_installed_wheel_ocr_callback_parity() -> None:
     wheel_python: Final = os.environ.get("LITELLM_OCR_WHEEL_PYTHON")
     if wheel_python is None:
-        pytest.skip("set LITELLM_OCR_WHEEL_PYTHON to the reviewed wheel's interpreter; release-wheel CI requires this lane")
+        pytest.skip(
+            "set LITELLM_OCR_WHEEL_PYTHON to the reviewed wheel's interpreter; release-wheel CI requires this lane"
+        )
     script: Final = Path(__file__).resolve().parents[1] / "rust_bridge" / "sdk_callback_wheel_test.py"
     completed: Final = subprocess.run((wheel_python, str(script)), check=False, timeout=240)
     assert completed.returncode == 0
@@ -66,6 +68,7 @@ class RecordingBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        litellm_call_id: str | None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -77,6 +80,7 @@ class RecordingBridge:
                 "extra_headers": extra_headers,
                 "optional_params": optional_params,
                 "timeout_seconds": timeout_seconds,
+                "litellm_call_id": litellm_call_id,
             }
         )
         return dict(FAKE_OCR_RESPONSE)
@@ -98,6 +102,7 @@ class RecordingAsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        litellm_call_id: str | None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -109,6 +114,7 @@ class RecordingAsyncBridge:
                 "extra_headers": extra_headers,
                 "optional_params": optional_params,
                 "timeout_seconds": timeout_seconds,
+                "litellm_call_id": litellm_call_id,
             }
         )
         return dict(FAKE_OCR_RESPONSE)
@@ -125,6 +131,7 @@ class RaisingBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        litellm_call_id: str | None,
     ) -> dict[str, object]:
         raise RuntimeError("bridge failed")
 
@@ -144,6 +151,7 @@ class RaisingAsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        litellm_call_id: str | None,
     ) -> dict[str, object]:
         raise RuntimeError("bridge failed")
 
@@ -153,6 +161,7 @@ class RecordingLogging:
 
     def __init__(self) -> None:
         self.pre_call_kwargs: dict[str, object] | None = None
+        self.litellm_call_id = "test-call-id"
 
     def pre_call(
         self,
@@ -225,6 +234,7 @@ def build_prepared_request(
         litellm_params=litellm_params or {},
         effective_timeout=timeout,
         litellm_logging_obj=logging_obj or RecordingLogging(),
+        litellm_call_id="test-call-id",
     )
 
 
@@ -303,6 +313,7 @@ def test_bridge_wrapper_forwards_prepared_args_and_wraps_response():
         },
         "optional_params": {"include_image_base64": True, "pages": [0]},
         "timeout_seconds": 12.5,
+        "litellm_call_id": None,
     }
 
 
@@ -342,6 +353,7 @@ async def test_bridge_wrapper_forwards_prepared_async_args_and_wraps_response():
         "extra_headers": None,
         "optional_params": {"vertex_project": "project-1"},
         "timeout_seconds": 42.0,
+        "litellm_call_id": None,
     }
 
 
@@ -377,6 +389,7 @@ def test_run_rust_ocr_prepares_request_and_wraps_response():
         },
         "optional_params": {"include_image_base64": True},
         "timeout_seconds": 12.5,
+        "litellm_call_id": "test-call-id",
     }
 
 
