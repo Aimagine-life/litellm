@@ -10,6 +10,7 @@ import httpx
 
 from . import configuration as _configuration
 from .bindings import UNCHANGED, Unchanged
+from .callbacks import OneShotCallbackHandle
 from .runtime import (
     BridgeErrorContext,
     EndpointDispatch,
@@ -31,6 +32,7 @@ class NativeOCRRequest:
     extra_headers: dict[str, object] | None
     optional_params: dict[str, object]
     timeout: float | httpx.Timeout | None
+    callback_adapter: OneShotCallbackHandle | None = None
 
 
 class RustOcr(Protocol):
@@ -44,6 +46,7 @@ class RustOcr(Protocol):
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callback_adapter: OneShotCallbackHandle | None,
     ) -> dict[str, object]:
         raise NotImplementedError
 
@@ -59,6 +62,7 @@ class RustAocr(Protocol):
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callback_adapter: OneShotCallbackHandle | None,
     ) -> Awaitable[dict[str, object]]:
         raise NotImplementedError
 
@@ -153,6 +157,7 @@ def _call_ocr(rust_ocr: RustOcr, request: NativeOCRRequest) -> Mapping[str, obje
         extra_headers=request.extra_headers,
         optional_params=request.optional_params,
         timeout_seconds=_timeout_to_seconds(request.timeout),
+        **({"callback_adapter": request.callback_adapter} if request.callback_adapter is not None else {}),
     )
 
 
@@ -166,4 +171,5 @@ def _call_aocr(rust_aocr: RustAocr, request: NativeOCRRequest) -> Awaitable[Mapp
         extra_headers=request.extra_headers,
         optional_params=request.optional_params,
         timeout_seconds=_timeout_to_seconds(request.timeout),
+        **({"callback_adapter": request.callback_adapter} if request.callback_adapter is not None else {}),
     )
