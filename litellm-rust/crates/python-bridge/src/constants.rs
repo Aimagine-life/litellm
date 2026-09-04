@@ -1,0 +1,2 @@
+pub(crate) const HTTP_CLIENT_TIMEOUT_SECS: u64 = 600;
+pub(crate) const HTTP_CLIENT_CONNECT_TIMEOUT_SECS: u64 = 10;

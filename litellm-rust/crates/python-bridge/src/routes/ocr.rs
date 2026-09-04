@@ -1,10 +1,12 @@
 use std::future::Future;
 
+use litellm_core::error::ErrorCode;
 use litellm_core::Error;
 use litellm_core::ocr::{OcrRequest, ocr as run_ocr};
 use pyo3::prelude::*;
 use serde_json::Value;
 
+use crate::client::shared_http_client;
 use crate::errors::ocr_error_to_pyerr;
 use crate::marshal::{RouteOptions, RouteOptionsInputs, object_or_empty};
 
@@ -23,6 +25,7 @@ fn prepare_ocr(
     let optional_params = object_or_empty("optional_params", inputs.optional_params)?;
 
     Ok(async move {
+        let client = shared_http_client().map_err(|error| Error::prepare(ErrorCode::Internal, error))?;
         let RouteOptions {
             model,
             api_key,
@@ -31,16 +34,19 @@ fn prepare_ocr(
             extra_headers,
             timeout,
         } = options;
-        run_ocr(OcrRequest {
-            model: &model,
-            document,
-            api_key: api_key.as_deref(),
-            api_base: api_base.as_deref(),
-            custom_llm_provider: custom_llm_provider.as_deref(),
-            extra_headers,
-            optional_params,
-            timeout,
-        })
+        run_ocr(
+            &client,
+            OcrRequest {
+                model: &model,
+                document,
+                api_key: api_key.as_deref(),
+                api_base: api_base.as_deref(),
+                custom_llm_provider: custom_llm_provider.as_deref(),
+                extra_headers,
+                optional_params,
+                timeout,
+            },
+        )
         .await
     })
 }
