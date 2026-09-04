@@ -32,6 +32,7 @@ class RustOCRRequest:
     extra_headers: dict[str, object] | None
     optional_params: dict[str, object]
     timeout: float | httpx.Timeout | None
+    max_document_download_bytes: int = 0
 
 
 class RustOcr(Protocol):
@@ -45,6 +46,7 @@ class RustOcr(Protocol):
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        max_document_download_bytes: int,
     ) -> dict[str, object]:
         raise NotImplementedError
 
@@ -60,6 +62,7 @@ class RustAocr(Protocol):
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        max_document_download_bytes: int,
     ) -> Awaitable[dict[str, object]]:
         raise NotImplementedError
 
@@ -135,6 +138,7 @@ def _call_ocr(rust_ocr: RustOcr, request: RustOCRRequest) -> Mapping[str, object
         extra_headers=request.extra_headers,
         optional_params=request.optional_params,
         timeout_seconds=_timeout_to_seconds(request.timeout),
+        max_document_download_bytes=request.max_document_download_bytes,
     )
 
 
@@ -148,4 +152,5 @@ def _call_aocr(rust_aocr: RustAocr, request: RustOCRRequest) -> Awaitable[Mappin
         extra_headers=request.extra_headers,
         optional_params=request.optional_params,
         timeout_seconds=_timeout_to_seconds(request.timeout),
+        max_document_download_bytes=request.max_document_download_bytes,
     )

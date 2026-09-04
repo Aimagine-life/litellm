@@ -88,6 +88,7 @@ ROUTE_CASES: Final = (
             "api_key": "sk-native",
             "custom_llm_provider": "mistral",
             "optional_params": {"include_image_base64": True},
+            "max_document_download_bytes": 50 * 1024 * 1024,
         },
         assert_request=assert_ocr_request,
         success_value=lambda response: response["pages"][0]["markdown"],

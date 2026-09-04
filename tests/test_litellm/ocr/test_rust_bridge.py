@@ -53,6 +53,7 @@ class RecordingBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        max_document_download_bytes: int,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -64,6 +65,7 @@ class RecordingBridge:
                 "extra_headers": extra_headers,
                 "optional_params": optional_params,
                 "timeout_seconds": timeout_seconds,
+                "max_document_download_bytes": max_document_download_bytes,
             }
         )
         return dict(FAKE_OCR_RESPONSE)
@@ -85,6 +87,7 @@ class RecordingAsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        max_document_download_bytes: int,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -96,6 +99,7 @@ class RecordingAsyncBridge:
                 "extra_headers": extra_headers,
                 "optional_params": optional_params,
                 "timeout_seconds": timeout_seconds,
+                "max_document_download_bytes": max_document_download_bytes,
             }
         )
         return dict(FAKE_OCR_RESPONSE)
@@ -112,6 +116,7 @@ class RaisingBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        max_document_download_bytes: int,
     ) -> dict[str, object]:
         raise RuntimeError("bridge failed")
 
@@ -127,6 +132,7 @@ class RaisingAsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        max_document_download_bytes: int,
     ) -> dict[str, object]:
         raise RuntimeError("bridge failed")
 
@@ -263,6 +269,7 @@ def test_bridge_wrapper_forwards_prepared_args_and_wraps_response():
             extra_headers={"Authorization": "Bearer sk-test", "x-trace-id": "trace-1"},
             optional_params={"include_image_base64": True, "pages": [0]},
             timeout=12.5,
+            max_document_download_bytes=1024,
         ),
         model="mistral-ocr-latest",
         provider="mistral",
@@ -284,6 +291,7 @@ def test_bridge_wrapper_forwards_prepared_args_and_wraps_response():
         },
         "optional_params": {"include_image_base64": True, "pages": [0]},
         "timeout_seconds": 12.5,
+        "max_document_download_bytes": 1024,
     }
 
 
@@ -304,6 +312,7 @@ async def test_bridge_wrapper_forwards_prepared_async_args_and_wraps_response():
             extra_headers=None,
             optional_params={"vertex_project": "project-1"},
             timeout=httpx.Timeout(30.0, read=42.0),
+            max_document_download_bytes=2048,
         ),
         model="mistral-ocr-maas",
         provider="vertex_ai",
@@ -321,6 +330,7 @@ async def test_bridge_wrapper_forwards_prepared_async_args_and_wraps_response():
         "extra_headers": None,
         "optional_params": {"vertex_project": "project-1"},
         "timeout_seconds": 42.0,
+        "max_document_download_bytes": 2048,
     }
 
 
@@ -355,6 +365,7 @@ def test_run_rust_ocr_prepares_request_and_wraps_response():
         },
         "optional_params": {"include_image_base64": True},
         "timeout_seconds": 12.5,
+        "max_document_download_bytes": 50 * 1024 * 1024,
     }
 
 
@@ -677,6 +688,23 @@ def test_ocr_passes_default_request_timeout_to_rust(fake_bridge):
     from litellm.constants import request_timeout
 
     assert fake_bridge.calls[0]["timeout_seconds"] == float(request_timeout)
+
+
+@pytest.mark.parametrize(
+    ("configured_mb", "expected_bytes"),
+    [(0.0, 0), (0.25, 256 * 1024), (-1.0, 0)],
+)
+def test_ocr_passes_configured_download_limit_to_rust(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_bridge: RecordingBridge,
+    configured_mb: float,
+    expected_bytes: int,
+) -> None:
+    monkeypatch.setattr(ocr_main, "MAX_IMAGE_URL_DOWNLOAD_SIZE_MB", configured_mb)
+
+    litellm.ocr(model=MODEL, document=DOCUMENT, api_key="sk-test")
+
+    assert fake_bridge.calls[0]["max_document_download_bytes"] == expected_bytes
 
 
 def test_ocr_disabled_never_loads_or_prepares_rust(monkeypatch: pytest.MonkeyPatch):
