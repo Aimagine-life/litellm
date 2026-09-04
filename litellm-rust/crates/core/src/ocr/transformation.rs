@@ -1,22 +1,8 @@
 use crate::Error;
+use crate::auth::AuthHeaderKind;
 use serde_json::{Map, Value};
 
 use super::types::{OcrRequestData, OcrResponseData};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OcrAuthStrategy {
-    Bearer,
-    Header(&'static str),
-}
-
-impl OcrAuthStrategy {
-    pub fn header_name(self) -> &'static str {
-        match self {
-            Self::Bearer => "authorization",
-            Self::Header(header_name) => header_name,
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OcrResponseHandling {
@@ -81,20 +67,20 @@ pub trait OcrProviderConfig: Sync {
         api_key: Option<&str>,
         env_lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Vec<(String, String)>, Error> {
-        let strategy = self.auth_strategy();
+        let strategy = self.auth_header_kind();
         if crate::http_utils::has_header(&headers, strategy.header_name()) {
             return Ok(headers);
         }
         let api_key = self.resolve_api_key(api_key, env_lookup)?;
         let auth_header = match strategy {
-            OcrAuthStrategy::Bearer => ("Authorization".to_string(), format!("Bearer {api_key}")),
-            OcrAuthStrategy::Header(name) => (name.to_string(), api_key),
+            AuthHeaderKind::Bearer => ("Authorization".to_string(), format!("Bearer {api_key}")),
+            AuthHeaderKind::Header(name) => (name.to_string(), api_key),
         };
         Ok(std::iter::once(auth_header).chain(headers).collect())
     }
 
-    fn auth_strategy(&self) -> OcrAuthStrategy {
-        OcrAuthStrategy::Bearer
+    fn auth_header_kind(&self) -> AuthHeaderKind {
+        AuthHeaderKind::Bearer
     }
 
     fn requires_data_uri_document(&self) -> bool {

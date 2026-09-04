@@ -17,9 +17,7 @@ use prepare::{PreparedOcrCall, prepare_ocr_call};
 pub async fn ocr(request: OcrRequest<'_>) -> Result<Value, Error> {
     let PreparedOcrCall { request, hooks } = prepare_ocr_call(request);
     CallLifecycle::default()
-        .run_request(request, &hooks, |request| {
-            execute_ocr_provider_call(request, &hooks)
-        })
+        .run_request(request, &hooks, execute_ocr_provider_call)
         .await
 }
 
@@ -76,6 +74,7 @@ mod tests {
             api_base: None,
             custom_llm_provider: None,
             extra_headers: None,
+            external_token_provider: None,
             optional_params: Map::new(),
             timeout: None,
             callbacks: Vec::new(),

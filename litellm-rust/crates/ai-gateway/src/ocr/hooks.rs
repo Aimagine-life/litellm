@@ -1,8 +1,12 @@
+use litellm_core::auth::{AuthSession, AuthorizeRequest};
 use litellm_core::call_lifecycle::{CallLifecycleContext, CallLifecycleHooks, CallLifecycleTiming};
 use litellm_core::error::Error;
+use litellm_core::ocr::auth::{auth_session, header_map, runtime};
 use litellm_core::providers::reducto::ocr::transformation::{
     build_upload_request, extract_document_source, extract_upload_file_id,
 };
+use reqwest::Method;
+use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, HeaderMap};
 use serde_json::{Map, Value, json};
 use std::future::Future;
 use std::pin::Pin;
@@ -80,17 +84,34 @@ impl OcrLifecycleHooks {
     ) -> Result<ProviderOcrRequest, Error> {
         let config = request.config?;
         let env_lookup = |key: &str| std::env::var(key).ok();
-        let upstream_headers = config.validate_environment(
-            string_headers(request.extra_headers)?,
-            request.api_key.as_deref(),
-            &env_lookup,
-        )?;
         let url = config.complete_url(
             request.api_base.as_deref(),
             &request.model,
             &request.optional_params,
             &env_lookup,
         )?;
+        let parsed_url = reqwest::Url::parse(&url)
+            .map_err(|error| Error::InvalidRequest(format!("invalid OCR provider URL: {error}")))?;
+        let upstream_headers = request_headers(header_map(string_headers(request.extra_headers)?)?);
+        let forwarded_auth = upstream_headers.contains_key(config.auth_header_kind().header_name())
+            || upstream_headers.contains_key(AUTHORIZATION);
+        let resolved_api_key = if request.api_key.is_none()
+            && request.external_token_provider.is_none()
+            && !forwarded_auth
+        {
+            Some(config.resolve_api_key(None, &env_lookup)?)
+        } else {
+            request.api_key
+        };
+        let auth_session = auth_session(
+            config,
+            resolved_api_key.as_deref(),
+            &upstream_headers,
+            request.external_token_provider,
+            &runtime(),
+            &parsed_url,
+        )
+        .await?;
         let model = request.model.clone();
         let custom_llm_provider = request.custom_llm_provider.clone();
         let is_reducto = custom_llm_provider == "reducto";
@@ -102,6 +123,7 @@ impl OcrLifecycleHooks {
                 &guarded_document,
                 request.api_base.as_deref(),
                 request.timeout,
+                &auth_session,
                 &upstream_headers,
             )
             .await?
@@ -127,6 +149,7 @@ impl OcrLifecycleHooks {
             body,
             optional_params,
             upstream_headers,
+            auth_session,
             timeout: request.timeout,
         })
     }
@@ -190,18 +213,27 @@ async fn upload_reducto_document(
     document: &Value,
     api_base: Option<&str>,
     timeout: Option<std::time::Duration>,
-    upstream_headers: &[(String, String)],
+    auth_session: &AuthSession,
+    upstream_headers: &HeaderMap,
 ) -> Result<Value, Error> {
     let source = extract_document_source(document)?;
-    let Some(authorization) = upstream_headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
-        .map(|(_, value)| value.as_str())
-    else {
-        return Err(Error::Auth(
-            "Reducto upload requires an Authorization header".to_string(),
-        ));
-    };
+    let upload_url = litellm_core::providers::reducto::ocr::transformation::upload_url(api_base);
+    let upload_url = reqwest::Url::parse(&upload_url)
+        .map_err(|error| Error::InvalidRequest(format!("invalid Reducto upload URL: {error}")))?;
+    let authorized_headers = auth_session
+        .authorize_primary(AuthorizeRequest {
+            method: &Method::POST,
+            url: &upload_url,
+            headers: upstream_headers.clone(),
+            serialized_body: None,
+        })
+        .await?;
+    let authorization = authorized_headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            Error::Auth("Reducto upload requires an Authorization header".to_string())
+        })?;
     let Some(upload) = build_upload_request(source, authorization, api_base) else {
         return Ok(document.clone());
     };
@@ -210,13 +242,9 @@ async fn upload_reducto_document(
         .mime_str(&upload.mime_type)
         .map_err(|error| Error::InvalidRequest(error.to_string()))?;
     let form = reqwest::multipart::Form::new().part("file", part);
-    let mut request_builder = http_client().post(upload.url).multipart(form);
-    for (name, value) in upstream_headers {
-        if !name.eq_ignore_ascii_case("content-type")
-            && !name.eq_ignore_ascii_case("content-length")
-        {
-            request_builder = request_builder.header(name, value);
-        }
+    let mut request_builder = http_client().post(upload_url).multipart(form);
+    for (name, value) in &authorized_headers {
+        request_builder = request_builder.header(name, value);
     }
     if let Some(timeout) = timeout {
         request_builder = request_builder.timeout(timeout);
@@ -243,9 +271,15 @@ async fn upload_reducto_document(
     Ok(json!({"type": "document_url", "document_url": file_id}))
 }
 
-impl CallLifecycleHooks<PreparedOcrRequest, PreparedOcrRequest, Value> for OcrLifecycleHooks {
+fn request_headers(mut headers: HeaderMap) -> HeaderMap {
+    headers.remove(CONTENT_TYPE);
+    headers.remove(CONTENT_LENGTH);
+    headers
+}
+
+impl CallLifecycleHooks<PreparedOcrRequest, ProviderOcrRequest, Value> for OcrLifecycleHooks {
     type PreCallFuture<'a> = OcrFuture<'a, PreparedOcrRequest>;
-    type DuringCallFuture<'a> = OcrFuture<'a, PreparedOcrRequest>;
+    type DuringCallFuture<'a> = OcrFuture<'a, ProviderOcrRequest>;
     type SuccessFuture<'a> = OcrLogFuture<'a>;
     type FailureFuture<'a> = OcrLogFuture<'a>;
 
@@ -262,7 +296,7 @@ impl CallLifecycleHooks<PreparedOcrRequest, PreparedOcrRequest, Value> for OcrLi
         _context: &'a CallLifecycleContext,
         request: PreparedOcrRequest,
     ) -> Self::DuringCallFuture<'a> {
-        Box::pin(async move { Ok(request) })
+        Box::pin(async move { self.prepare_provider_request(request).await })
     }
 
     fn async_log_success_event<'a>(

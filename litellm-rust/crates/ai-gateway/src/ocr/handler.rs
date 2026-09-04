@@ -1,21 +1,35 @@
+use litellm_core::auth::AuthorizeRequest;
 use litellm_core::error::Error;
 use litellm_core::http_utils::http_request;
 use litellm_core::ocr::transformation::OcrResponseHandling;
+use reqwest::Method;
+use reqwest::header::CONTENT_TYPE;
 use serde_json::Value;
 
 use super::common_utils::{poll_document_intelligence, truncate_error_body};
-use super::hooks::OcrLifecycleHooks;
-use super::types::PreparedOcrRequest;
+use super::types::ProviderOcrRequest;
 use crate::client::http_client;
 
 #[tracing::instrument(target = "litellm::function_trace", level = "trace", skip_all)]
-pub(crate) async fn execute_ocr_provider_call(
-    request: PreparedOcrRequest,
-    hooks: &OcrLifecycleHooks,
-) -> Result<Value, Error> {
-    let request = hooks.prepare_provider_request(request).await?;
-    let mut request_builder = http_client().post(&request.url).json(&request.body);
-    for (key, value) in &request.upstream_headers {
+pub(crate) async fn execute_ocr_provider_call(request: ProviderOcrRequest) -> Result<Value, Error> {
+    let url = reqwest::Url::parse(&request.url)
+        .map_err(|error| Error::InvalidRequest(format!("invalid OCR provider URL: {error}")))?;
+    let serialized_body = serde_json::to_vec(&request.body)
+        .map_err(|error| Error::InvalidRequest(format!("invalid OCR request body: {error}")))?;
+    let authorized_headers = request
+        .auth_session
+        .authorize_primary(AuthorizeRequest {
+            method: &Method::POST,
+            url: &url,
+            headers: request.upstream_headers,
+            serialized_body: Some(&serialized_body),
+        })
+        .await?;
+    let mut request_builder = http_client()
+        .post(url)
+        .header(CONTENT_TYPE, "application/json")
+        .body(serialized_body);
+    for (key, value) in &authorized_headers {
         request_builder = request_builder.header(key, value);
     }
     if let Some(duration) = request.timeout {
@@ -41,13 +55,9 @@ pub(crate) async fn execute_ocr_provider_call(
                         .to_string(),
                 )
             })?;
-        let response_json = poll_document_intelligence(
-            &operation_url,
-            &request.url,
-            &request.upstream_headers,
-            request.timeout,
-        )
-        .await?;
+        let response_json =
+            poll_document_intelligence(&operation_url, &request.auth_session, request.timeout)
+                .await?;
         return Ok(request
             .config
             .transform_ocr_response_with_params(

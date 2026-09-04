@@ -56,6 +56,7 @@ _RUST_OCR_PROVIDERS: Final = {
     "mistral",
     "azure_ai",
     "vertex_ai",
+    "reducto",
 }
 
 
@@ -230,21 +231,49 @@ def _rust_bridge_api_base(
     return None
 
 
+def _rust_ocr_token_provider(prepared_request: _PreparedOCRRequest) -> Callable[[], object] | None:
+    if prepared_request.custom_llm_provider == "vertex_ai":
+        from litellm.llms.vertex_ai.vertex_llm_base import VertexBase
+
+        vertex_base: Final = VertexBase()
+        vertex_project: Final = VertexBase.safe_get_vertex_ai_project(litellm_params=prepared_request.litellm_params)
+        vertex_credentials: Final = VertexBase.safe_get_vertex_ai_credentials(
+            litellm_params=prepared_request.litellm_params
+        )
+
+        def resolve_vertex_token() -> object:
+            token, _ = vertex_base.get_access_token(
+                credentials=vertex_credentials,
+                project_id=vertex_project,
+            )
+            return token
+
+        return resolve_vertex_token
+    if prepared_request.custom_llm_provider == "azure_ai":
+        from litellm.llms.azure_ai.common_utils import get_azure_ai_entra_token
+
+        def resolve_azure_token() -> object:
+            token: Final = get_azure_ai_entra_token(litellm_params=prepared_request.litellm_params)
+            if token is None:
+                raise ValueError("No Azure Entra ID credential could be resolved")
+            return token
+
+        return resolve_azure_token
+    return None
+
+
 def _prepare_rust_ocr_call(
     prepared_request: _PreparedOCRRequest,
     resolve_api_key: Callable[[str], str | None],
 ) -> rust_ocr_bridge.RustOCRRequest:
     provider_config: Final = prepared_request.provider_config
     api_key_env_var: Final = provider_config.get_api_key_env_var()
-    resolved_api_key: Final = prepared_request.api_key or (
-        resolve_api_key(api_key_env_var) if api_key_env_var is not None else None
-    )
-    resolved_headers: Final = provider_config.validate_environment(
-        headers=prepared_request.extra_headers or {},
-        model=prepared_request.model,
-        api_key=resolved_api_key,
-        api_base=prepared_request.api_base,
-        litellm_params=prepared_request.litellm_params,
+    resolved_api_key: Final = (
+        prepared_request.api_key
+        if prepared_request.api_key is not None
+        else resolve_api_key(api_key_env_var)
+        if api_key_env_var is not None
+        else None
     )
     resolved_complete_url: Final = provider_config.get_complete_url(
         api_base=prepared_request.api_base,
@@ -264,7 +293,7 @@ def _prepare_rust_ocr_call(
                 **rust_optional_params,
             },
             "api_base": resolved_complete_url,
-            "headers": resolved_headers,
+            "headers": prepared_request.extra_headers,
         },
     )
     return rust_ocr_bridge.RustOCRRequest(
@@ -273,10 +302,11 @@ def _prepare_rust_ocr_call(
         api_key=resolved_api_key,
         api_base=rust_api_base,
         custom_llm_provider=prepared_request.custom_llm_provider,
-        extra_headers=cast(dict[str, object], resolved_headers),
+        extra_headers=prepared_request.extra_headers,
         optional_params=rust_optional_params,
         timeout=prepared_request.effective_timeout,
         max_document_download_bytes=max(0, int(MAX_IMAGE_URL_DOWNLOAD_SIZE_MB * 1024 * 1024)),
+        token_provider=_rust_ocr_token_provider(prepared_request),
     )
 
 

@@ -1,9 +1,11 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::transformation::OcrProviderConfig;
+use crate::auth::{AuthSession, TokenProvider};
 
 pub struct OcrRequest<'a> {
     pub model: &'a str,
@@ -12,19 +14,20 @@ pub struct OcrRequest<'a> {
     pub api_base: Option<&'a str>,
     pub custom_llm_provider: Option<&'a str>,
     pub extra_headers: Option<Map<String, Value>>,
+    pub external_token_provider: Option<Arc<dyn TokenProvider>>,
     pub optional_params: Map<String, Value>,
     pub timeout: Option<Duration>,
     pub max_document_download_bytes: u64,
 }
 
-pub(super) struct PreparedOcrRequest {
+pub struct PreparedOcrRequest {
     pub(super) model: String,
     pub(super) config: &'static dyn OcrProviderConfig,
     pub(super) document: Value,
-    pub(super) api_key: Option<String>,
     pub(super) api_base: Option<String>,
-    pub(super) extra_headers: Option<Map<String, Value>>,
-    pub(super) url_params: Map<String, Value>,
+    pub(super) url: reqwest::Url,
+    pub(super) headers: reqwest::header::HeaderMap,
+    pub(super) auth_session: AuthSession,
     pub(super) optional_params: Map<String, Value>,
     pub(super) requires_reducto_upload: bool,
     pub(super) timeout: Option<Duration>,

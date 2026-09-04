@@ -1,16 +1,17 @@
 use std::time::Duration;
 
+use reqwest::Method;
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderMap};
 use serde_json::{Map, Value, json};
 
-use super::common_utils::{
-    convert_document_url_to_data_uri, poll_document_intelligence, string_headers,
-};
+use super::common_utils::{convert_document_url_to_data_uri, poll_document_intelligence};
 use super::types::PreparedOcrRequest;
+use crate::auth::{AuthSession, AuthorizeRequest};
 use crate::error::Error;
 use crate::http_utils::{http_request, truncate_error_body};
 use crate::ocr::transformation::{OcrProviderConfig, OcrResponseHandling};
 use crate::providers::reducto::ocr::transformation::{
-    build_upload_request, extract_document_source, extract_upload_file_id,
+    build_upload_request, extract_document_source, extract_upload_file_id, upload_url,
 };
 
 fn public_response(
@@ -34,22 +35,16 @@ pub(crate) async fn execute_ocr_provider_call(
         model,
         config,
         document,
-        api_key,
         api_base,
-        extra_headers,
-        url_params,
+        url,
+        headers,
+        auth_session,
         optional_params,
         requires_reducto_upload,
         timeout,
         max_document_download_bytes,
     } = request;
-    let env_lookup = |key: &str| std::env::var(key).ok();
-    let upstream_headers = config.validate_environment(
-        string_headers(extra_headers)?,
-        api_key.as_deref(),
-        &env_lookup,
-    )?;
-    let url = config.complete_url(api_base.as_deref(), &model, &url_params, &env_lookup)?;
+    let upstream_headers = request_headers(headers);
     let document = if config.requires_data_uri_document() {
         convert_document_url_to_data_uri(client, document, max_document_download_bytes).await?
     } else if requires_reducto_upload {
@@ -58,6 +53,7 @@ pub(crate) async fn execute_ocr_provider_call(
             document,
             api_base.as_deref(),
             timeout,
+            &auth_session,
             &upstream_headers,
         )
         .await?
@@ -67,10 +63,21 @@ pub(crate) async fn execute_ocr_provider_call(
     let body = config
         .transform_ocr_request(&model, document, optional_params.clone())?
         .data;
-    let mut request_builder = client.post(&url).json(&body);
-    for (key, value) in upstream_headers.iter().filter(|(key, _)| {
-        !key.eq_ignore_ascii_case("content-type") && !key.eq_ignore_ascii_case("content-length")
-    }) {
+    let serialized_body = serde_json::to_vec(&body)
+        .map_err(|error| Error::InvalidRequest(format!("invalid OCR request body: {error}")))?;
+    let authorized_headers = auth_session
+        .authorize_primary(AuthorizeRequest {
+            method: &Method::POST,
+            url: &url,
+            headers: upstream_headers,
+            serialized_body: Some(&serialized_body),
+        })
+        .await?;
+    let mut request_builder = client
+        .post(url.clone())
+        .header(CONTENT_TYPE, "application/json")
+        .body(serialized_body);
+    for (key, value) in &authorized_headers {
         request_builder = request_builder.header(key, value);
     }
     if let Some(duration) = timeout {
@@ -97,8 +104,7 @@ pub(crate) async fn execute_ocr_provider_call(
                 )
             })?;
         let response_json =
-            poll_document_intelligence(client, &operation_url, &url, &upstream_headers, timeout)
-                .await?;
+            poll_document_intelligence(client, &operation_url, &auth_session, timeout).await?;
         return public_response(config, &model, &optional_params, response_json);
     }
 
@@ -125,13 +131,23 @@ async fn upload_reducto_document(
     document: Value,
     api_base: Option<&str>,
     timeout: Option<Duration>,
-    upstream_headers: &[(String, String)],
+    auth_session: &AuthSession,
+    upstream_headers: &HeaderMap,
 ) -> Result<Value, Error> {
     let source = extract_document_source(&document)?;
-    let authorization = upstream_headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
-        .map(|(_, value)| value.as_str())
+    let upload_url = reqwest::Url::parse(&upload_url(api_base))
+        .map_err(|error| Error::InvalidRequest(format!("invalid Reducto upload URL: {error}")))?;
+    let authorized_headers = auth_session
+        .authorize_primary(AuthorizeRequest {
+            method: &Method::POST,
+            url: &upload_url,
+            headers: upstream_headers.clone(),
+            serialized_body: None,
+        })
+        .await?;
+    let authorization = authorized_headers
+        .get(reqwest::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
             Error::Auth("Reducto upload requires an Authorization header".to_string())
         })?;
@@ -143,16 +159,10 @@ async fn upload_reducto_document(
         .mime_str(&upload.mime_type)
         .map_err(|error| Error::InvalidRequest(error.to_string()))?;
     let form = reqwest::multipart::Form::new().part("file", part);
-    let request_builder = upstream_headers
-        .iter()
-        .filter(|(name, _)| {
-            !name.eq_ignore_ascii_case("content-type")
-                && !name.eq_ignore_ascii_case("content-length")
-        })
-        .fold(
-            client.post(upload.url).multipart(form),
-            |builder, (name, value)| builder.header(name, value),
-        );
+    let request_builder = authorized_headers.iter().fold(
+        client.post(upload_url).multipart(form),
+        |builder, (name, value)| builder.header(name, value),
+    );
     let request_builder = match timeout {
         Some(duration) => request_builder.timeout(duration),
         None => request_builder,
@@ -176,4 +186,10 @@ async fn upload_reducto_document(
     })?;
     let file_id = extract_upload_file_id(&response_json)?;
     Ok(json!({"type": "document_url", "document_url": file_id}))
+}
+
+fn request_headers(mut headers: HeaderMap) -> HeaderMap {
+    headers.remove(CONTENT_TYPE);
+    headers.remove(CONTENT_LENGTH);
+    headers
 }

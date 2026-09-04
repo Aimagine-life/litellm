@@ -1,7 +1,8 @@
 use std::future::Future;
+use std::sync::Arc;
 
-use litellm_core::error::ErrorCode;
 use litellm_core::Error;
+use litellm_core::auth::TokenProvider;
 use litellm_core::ocr::{OcrRequest, ocr as run_ocr};
 use pyo3::prelude::*;
 use serde_json::Value;
@@ -9,10 +10,16 @@ use serde_json::Value;
 use crate::client::shared_http_client;
 use crate::errors::ocr_error_to_pyerr;
 use crate::marshal::{RouteOptions, RouteOptionsInputs, object_or_empty};
+use crate::python_token_provider::PythonTokenProvider;
 
 fn prepare_ocr(
     inputs: OcrInputs,
 ) -> PyResult<impl Future<Output = Result<Value, Error>> + Send + 'static> {
+    let external_token_provider = inputs
+        .token_provider
+        .map(|callable| Python::attach(|py| PythonTokenProvider::capture(py, callable)))
+        .transpose()?
+        .map(|provider| Arc::new(provider) as Arc<dyn TokenProvider>);
     let document = inputs.document;
     let options = RouteOptions::from_python(RouteOptionsInputs {
         model: inputs.model,
@@ -25,7 +32,7 @@ fn prepare_ocr(
     let optional_params = object_or_empty("optional_params", inputs.optional_params)?;
 
     Ok(async move {
-        let client = shared_http_client().map_err(|error| Error::prepare(ErrorCode::Internal, error))?;
+        let client = shared_http_client().map_err(Error::Network)?;
         let RouteOptions {
             model,
             api_key,
@@ -43,6 +50,7 @@ fn prepare_ocr(
                 api_base: api_base.as_deref(),
                 custom_llm_provider: custom_llm_provider.as_deref(),
                 extra_headers,
+                external_token_provider,
                 optional_params,
                 timeout,
                 max_document_download_bytes: inputs.max_document_download_bytes,
@@ -71,6 +79,7 @@ bridge_route! {
         #[pyo3(from_py_with = litellm_python_interop::from_py)]
         optional_params: Option<serde_json::Value>,
         timeout_seconds: Option<f64>,
+        token_provider: Option<Py<PyAny>>,
     },
     prepare = prepare_ocr,
     errors = ocr_error_to_pyerr,

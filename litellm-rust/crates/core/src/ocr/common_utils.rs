@@ -3,9 +3,10 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use reqwest::Url;
+use reqwest::{Method, Url};
 use serde_json::{Map, Value};
 
+use crate::auth::{AuthSession, AuthorizeRequest};
 use crate::constants::{OCR_DOCUMENT_INTELLIGENCE_POLL_TIMEOUT_SECS, OCR_MAX_SAFE_FETCH_REDIRECTS};
 use crate::error::Error;
 use crate::http_utils::truncate_error_body;
@@ -272,18 +273,6 @@ pub(super) async fn convert_document_url_to_data_uri(
     Ok(Value::Object(transformed))
 }
 
-fn same_origin(left: &str, right: &str) -> bool {
-    let Ok(left) = reqwest::Url::parse(left) else {
-        return false;
-    };
-    let Ok(right) = reqwest::Url::parse(right) else {
-        return false;
-    };
-    left.scheme() == right.scheme()
-        && left.host_str() == right.host_str()
-        && left.port_or_known_default() == right.port_or_known_default()
-}
-
 fn retry_after_secs(response: &reqwest::Response) -> u64 {
     response
         .headers()
@@ -321,15 +310,11 @@ fn operation_status(response_json: &Value) -> Result<&str, Error> {
 pub(super) async fn poll_document_intelligence(
     client: &reqwest::Client,
     operation_url: &str,
-    original_url: &str,
-    headers: &[(String, String)],
+    auth_session: &AuthSession,
     timeout: Option<Duration>,
 ) -> Result<Value, Error> {
-    if !same_origin(operation_url, original_url) {
-        return Err(Error::InvalidResponse(
-            "Azure Document Intelligence: rejected cross-origin polling URL".to_string(),
-        ));
-    }
+    let operation_url = Url::parse(operation_url)
+        .map_err(|error| Error::InvalidResponse(format!("invalid Azure polling URL: {error}")))?;
 
     let start = Instant::now();
     let timeout = timeout.unwrap_or(Duration::from_secs(
@@ -343,12 +328,18 @@ pub(super) async fn poll_document_intelligence(
             )));
         }
 
-        let mut request_builder = client.get(operation_url);
-        for (key, value) in headers {
-            if key.eq_ignore_ascii_case("ocp-apim-subscription-key") {
-                request_builder = request_builder.header(key, value);
-            }
-        }
+        let headers = auth_session
+            .authorize_follow_up(AuthorizeRequest {
+                method: &Method::GET,
+                url: &operation_url,
+                headers: reqwest::header::HeaderMap::new(),
+                serialized_body: None,
+            })
+            .await?;
+        let request_builder = headers.iter().fold(
+            client.get(operation_url.clone()),
+            |builder, (name, value)| builder.header(name, value),
+        );
         let response = request_builder
             .send()
             .await

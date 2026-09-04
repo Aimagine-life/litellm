@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
+use crate::auth::AuthHeaderKind;
 use crate::error::{Error, json_type_name};
-use crate::ocr::transformation::{OcrAuthStrategy, OcrProviderConfig, OcrResponseHandling};
+use crate::ocr::transformation::{OcrProviderConfig, OcrResponseHandling};
 use crate::ocr::types::{OcrRequestData, OcrResponseData};
 use serde_json::{Map, Value, json};
 
@@ -641,8 +642,8 @@ impl OcrProviderConfig for AzureDocumentIntelligenceOcrConfig {
         resolve_document_intelligence_api_key(api_key, env_lookup)
     }
 
-    fn auth_strategy(&self) -> OcrAuthStrategy {
-        OcrAuthStrategy::Header("Ocp-Apim-Subscription-Key")
+    fn auth_header_kind(&self) -> AuthHeaderKind {
+        AuthHeaderKind::Header("Ocp-Apim-Subscription-Key")
     }
 
     fn response_handling(&self) -> OcrResponseHandling {

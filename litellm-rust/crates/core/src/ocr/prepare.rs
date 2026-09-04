@@ -1,6 +1,8 @@
 use serde_json::{Map, Value};
 
+use super::auth::{auth_session, header_map, runtime};
 use super::common_utils::ocr_provider_config;
+use super::common_utils::string_headers;
 use super::types::{OcrRequest, PreparedOcrRequest};
 use crate::error::Error;
 use crate::ocr::transformation::OcrProviderConfig;
@@ -8,6 +10,12 @@ use crate::routing_utils::provider::{CustomLlmProvider, get_custom_llm_provider}
 
 #[tracing::instrument(target = "litellm::function_trace", level = "trace", skip_all)]
 pub(super) async fn prepare_ocr_call(request: OcrRequest<'_>) -> Result<PreparedOcrRequest, Error> {
+    if !request.document.is_object() {
+        return Err(Error::InvalidType {
+            expected: "object",
+            actual: crate::error::json_type_name(&request.document),
+        });
+    }
     let provider_info = get_custom_llm_provider(request.model, request.custom_llm_provider)
         .or_else(|| {
             request
@@ -27,15 +35,44 @@ pub(super) async fn prepare_ocr_call(request: OcrRequest<'_>) -> Result<Prepared
         .ok_or_else(|| Error::InvalidProvider(provider.clone()))?;
     validate_request_format(config, &request.optional_params, &provider)?;
     let optional_params = map_optional_params(config, &request.optional_params);
+    let env_lookup = |key: &str| std::env::var(key).ok();
+    let url = config.complete_url(
+        request.api_base,
+        &model,
+        &request.optional_params,
+        &env_lookup,
+    )?;
+    let url = reqwest::Url::parse(&url)
+        .map_err(|error| Error::InvalidRequest(format!("invalid OCR provider URL: {error}")))?;
+    let headers = header_map(string_headers(request.extra_headers)?)?;
+    let forwarded_auth = headers.contains_key(config.auth_header_kind().header_name())
+        || headers.contains_key(reqwest::header::AUTHORIZATION);
+    let resolved_api_key = if request.api_key.is_none()
+        && request.external_token_provider.is_none()
+        && !forwarded_auth
+    {
+        Some(config.resolve_api_key(None, &env_lookup)?)
+    } else {
+        request.api_key.map(str::to_string)
+    };
+    let auth_session = auth_session(
+        config,
+        resolved_api_key.as_deref(),
+        &headers,
+        request.external_token_provider,
+        &runtime(),
+        &url,
+    )
+    .await?;
 
     Ok(PreparedOcrRequest {
         model,
         config,
         document: request.document,
-        api_key: request.api_key.map(str::to_string),
         api_base: request.api_base.map(str::to_string),
-        extra_headers: request.extra_headers,
-        url_params: request.optional_params,
+        url,
+        headers,
+        auth_session,
         optional_params,
         requires_reducto_upload: provider == "reducto",
         timeout: request.timeout,
@@ -95,6 +132,7 @@ mod tests {
             api_base: None,
             custom_llm_provider: None,
             extra_headers: None,
+            external_token_provider: None,
             optional_params: Map::from_iter([("req_format".to_string(), json!(format))]),
             timeout: None,
             max_document_download_bytes: 50 * 1024 * 1024,

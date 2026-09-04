@@ -225,7 +225,7 @@ mod tests {
                 (
                     "ocr",
                     "aocr",
-                    "(model, document, max_document_download_bytes, api_key=None, api_base=None, custom_llm_provider=None, extra_headers=None, optional_params=None, timeout_seconds=None)",
+                    "(model, document, max_document_download_bytes, api_key=None, api_base=None, custom_llm_provider=None, extra_headers=None, optional_params=None, timeout_seconds=None, token_provider=None)",
                 ),
                 (
                     "transcription",
