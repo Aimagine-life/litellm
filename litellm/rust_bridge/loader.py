@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Set
 from types import ModuleType
-from typing import Final, cast
+from typing import Final, cast  # noqa: TID251  # runtime typing constructs
 
 _BRIDGE_SENTINEL: Final = object()
 _cached_bridge: ModuleType | None | object = _BRIDGE_SENTINEL
