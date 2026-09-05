@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Final, Protocol, cast  # noqa: TID251  # runtime typing constructs
+from typing import Final, Protocol, TypeVar, cast  # noqa: TID251  # runtime typing constructs
 
 import httpx
 
@@ -14,17 +14,16 @@ from .callbacks import OneShotCallbackHandle
 from .runtime import (
     BridgeErrorContext,
     EndpointDispatch,
-    async_none,
-    identity,
 )  # cast-ok: generic classmethod cannot preserve the route Protocol parameters
 from .timeouts import timeout_to_seconds as _timeout_to_seconds
 
 rust_ocr_enabled = _configuration.rust_ocr_enabled
 rust = _configuration.rust
+ResultT = TypeVar("ResultT")
 
 
 @dataclass(frozen=True, slots=True)
-class RustOCRRequest:
+class NativeOCRRequest:
     model: str
     document: dict[str, object]
     api_key: str | None
@@ -81,58 +80,64 @@ _OCR: Final = cast(  # cast-ok: generic classmethod loses the route Protocol par
 
 def set_rust_ocr(
     *,
-    ocr: RustOcr | None | Unchanged = UNCHANGED,
-    aocr: RustAocr | None | Unchanged = UNCHANGED,
+    sync: RustOcr | None | Unchanged = UNCHANGED,
+    asynchronous: RustAocr | None | Unchanged = UNCHANGED,
 ) -> None:
-    if not isinstance(ocr, Unchanged):
-        if ocr is None:
+    if not isinstance(sync, Unchanged):
+        if sync is None:
             _OCR.sync.reset()
         else:
-            _OCR.sync.override(ocr)
-    if not isinstance(aocr, Unchanged):
-        if aocr is None:
+            _OCR.sync.override(sync)
+    if not isinstance(asynchronous, Unchanged):
+        if asynchronous is None:
             _OCR.asynchronous.reset()
         else:
-            _OCR.asynchronous.override(aocr)
+            _OCR.asynchronous.override(asynchronous)
 
 
-def ocr(
+def dispatch_ocr(
     *,
-    prepare: Callable[[], RustOCRRequest],
+    prepare: Callable[[], NativeOCRRequest],
+    fallback: Callable[[], ResultT],
+    adapt: Callable[[Mapping[str, object]], ResultT],
     model: str,
     provider: str,
     request_override: bool | None,
     eligible: bool,
-) -> Mapping[str, object] | None:
+) -> ResultT:
     return _OCR.invoke(
-        call=lambda rust_ocr: _call_ocr(rust_ocr, prepare()),
-        fallback=lambda: None,
-        adapt=identity,
+        prepare=prepare,
+        call=_call_ocr,
+        fallback=fallback,
+        adapt=adapt,
         context=BridgeErrorContext(provider=provider, model=model),
         request_override=request_override,
         eligible=eligible,
     )
 
 
-async def aocr(
+async def adispatch_ocr(
     *,
-    prepare: Callable[[], RustOCRRequest],
+    prepare: Callable[[], NativeOCRRequest],
+    fallback: Callable[[], Awaitable[ResultT]],
+    adapt: Callable[[Mapping[str, object]], ResultT],
     model: str,
     provider: str,
     request_override: bool | None,
     eligible: bool,
-) -> Mapping[str, object] | None:
+) -> ResultT:
     return await _OCR.ainvoke(
-        call=lambda rust_aocr: _call_aocr(rust_aocr, prepare()),
-        fallback=async_none,
-        adapt=identity,
+        prepare=prepare,
+        call=_call_aocr,
+        fallback=fallback,
+        adapt=adapt,
         context=BridgeErrorContext(provider=provider, model=model),
         request_override=request_override,
         eligible=eligible,
     )
 
 
-def _call_ocr(rust_ocr: RustOcr, request: RustOCRRequest) -> Mapping[str, object]:
+def _call_ocr(rust_ocr: RustOcr, request: NativeOCRRequest) -> Mapping[str, object]:
     return rust_ocr(
         model=request.model,
         document=request.document,
@@ -146,7 +151,7 @@ def _call_ocr(rust_ocr: RustOcr, request: RustOCRRequest) -> Mapping[str, object
     )
 
 
-def _call_aocr(rust_aocr: RustAocr, request: RustOCRRequest) -> Awaitable[Mapping[str, object]]:
+def _call_aocr(rust_aocr: RustAocr, request: NativeOCRRequest) -> Awaitable[Mapping[str, object]]:
     return rust_aocr(
         model=request.model,
         document=request.document,
