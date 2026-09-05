@@ -13,7 +13,7 @@ from typing import (
     cast,
 )
 
-from ..exceptions import APIError
+from ..exceptions import APIError, AuthenticationError, InternalServerError, RateLimitError
 from .bindings import (
     UNCHANGED,
     NativeBinding,
@@ -317,9 +317,28 @@ class EndpointBinding(Generic[BindingT]):
         )
         status: Final = status_value if isinstance(status_value, int) else 0
         message: Final = message_value if isinstance(message_value, str) else str(message_value)
+        error_message: Final = f"litellm rust {self.route}: {message}"
+        if status == 401:
+            raise AuthenticationError(
+                message=error_message,
+                llm_provider=context.provider,
+                model=context.model,
+            ) from error
+        if status == 429:
+            raise RateLimitError(
+                message=error_message,
+                llm_provider=context.provider,
+                model=context.model,
+            ) from error
+        if status == 500:
+            raise InternalServerError(
+                message=error_message,
+                llm_provider=context.provider,
+                model=context.model,
+            ) from error
         raise APIError(
             status_code=status or 500,
-            message=f"litellm rust {self.route}: {message}",
+            message=error_message,
             llm_provider=context.provider,
             model=context.model,
         ) from error

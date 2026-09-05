@@ -6,7 +6,7 @@ from typing import Final
 
 import pytest
 
-from litellm.exceptions import APIError
+from litellm.exceptions import APIError, AuthenticationError, InternalServerError, RateLimitError
 from litellm.rust_bridge import bindings, runtime
 
 
@@ -165,20 +165,23 @@ async def test_ainvoke_adapts_native_success_without_fallback() -> None:
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_status", "expected_message"),
+    ("error", "expected_type", "expected_status", "expected_message"),
     (
-        pytest.param(RustUpstreamError(429, "rate limited"), 429, "rate limited", id="provider-status"),
-        pytest.param(RustUpstreamError(0, "connection reset"), 500, "connection reset", id="transport-failure"),
+        pytest.param(RustUpstreamError(401, "unauthorized"), AuthenticationError, 401, "unauthorized", id="auth"),
+        pytest.param(RustUpstreamError(429, "rate limited"), RateLimitError, 429, "rate limited", id="rate-limit"),
+        pytest.param(RustUpstreamError(500, "failed"), InternalServerError, 500, "failed", id="server-error"),
+        pytest.param(RustUpstreamError(0, "connection reset"), APIError, 500, "connection reset", id="transport"),
     ),
 )
 def test_upstream_failure_maps_to_api_error_without_fallback(
     error: RustUpstreamError,
+    expected_type: type[BaseException],
     expected_status: int,
     expected_message: str,
 ) -> None:
     bridge: Final = runtime.EndpointBinding(route="messages", load=object, enabled=enabled)
 
-    with pytest.raises(APIError, match=expected_message) as caught:
+    with pytest.raises(expected_type, match=expected_message) as caught:
         bridge.invoke(
             prepare=lambda: None,
             call=lambda _binding, _request: (_ for _ in ()).throw(error),
