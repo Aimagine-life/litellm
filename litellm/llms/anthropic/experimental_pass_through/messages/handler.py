@@ -417,7 +417,7 @@ def validate_anthropic_api_metadata(metadata: dict | None = None) -> dict | None
     return anthropic_metadata_obj.model_dump(exclude_none=True)
 
 
-def anthropic_messages_handler(
+def anthropic_messages_handler(  # noqa: C901  # dispatch preserves the provider's existing request branches
     max_tokens: int,
     messages: list[dict],
     model: str,

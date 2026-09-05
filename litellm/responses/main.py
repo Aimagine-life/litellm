@@ -975,7 +975,7 @@ def _responses_try_dispatch_emulated_file_search(
 
 
 @client
-def responses(
+def responses(  # noqa: C901  # dispatch preserves the provider's existing request branches
     input: str | ResponseInputParam,
     model: str,
     include: list[ResponseIncludable] | None = None,
