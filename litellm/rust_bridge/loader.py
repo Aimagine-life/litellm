@@ -43,6 +43,8 @@ def native_route_ready(route: str, required_capabilities: frozenset[str] = froze
     ready_endpoints: Final = getattr(native, "ready_endpoints", None)
     if not isinstance(ready_endpoints, Mapping):
         return False
-    typed_endpoints: Final = cast(Mapping[object, object], ready_endpoints)
+    typed_endpoints: Final = cast(  # cast-ok: native metadata was validated as a Mapping
+        Mapping[object, object], ready_endpoints
+    )
     capabilities: Final = typed_endpoints.get(route)
     return isinstance(capabilities, Set) and required_capabilities.issubset(capabilities)
