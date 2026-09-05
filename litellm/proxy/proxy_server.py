@@ -11454,13 +11454,27 @@ def _realtime_query_params_template(model: str | None, intent: str | None) -> tu
 
 
 async def _release_realtime_budget_reservation(user_api_key_dict: UserAPIKeyAuth) -> None:
+    reservation: Final = user_api_key_dict.budget_reservation
+    if reservation is None or reservation.get("finalized") is True:
+        return
+
+    from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
     from litellm.proxy.spend_tracking.budget_reservation import (
         release_or_invalidate_budget_reservation,
     )
 
-    await release_or_invalidate_budget_reservation(
-        budget_reservation=user_api_key_dict.budget_reservation,
-    )
+    # ``log_messages()`` enqueues ``dispatch_success_handlers`` on the bounded
+    # logging worker rather than awaiting it, so this ``finally`` otherwise
+    # races the settlement and wins: it finalizes the reservation to zero,
+    # and ``_PROXY_track_cost_callback``'s reconcile then no-ops on
+    # ``finalized`` when the queued task finally runs, silently dropping the
+    # session's real cost. Drain pending logging work first so the async
+    # settlement can reconcile with the actual cost; the release below then
+    # no-ops on the ``finalized`` flag. Refused sessions (whose failure
+    # handler never touches the reservation) still fall through and get
+    # released as intended.
+    await GLOBAL_LOGGING_WORKER.flush()
+    await release_or_invalidate_budget_reservation(budget_reservation=reservation)
 
 
 @app.websocket("/openai/v1/realtime")

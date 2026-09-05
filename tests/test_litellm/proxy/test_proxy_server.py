@@ -9577,6 +9577,72 @@ async def test_refused_realtime_session_releases_the_budget_reservation():
 
 
 @pytest.mark.asyncio
+async def test_release_realtime_reservation_waits_for_async_settlement_before_releasing():
+    """Regression: the realtime endpoint's ``finally`` used to call
+    ``release_or_invalidate_budget_reservation`` immediately, but
+    ``log_messages()`` only enqueues ``dispatch_success_handlers`` on the
+    bounded logging worker. The release therefore ran before
+    ``_PROXY_track_cost_callback`` could reconcile with the real cost,
+    marked the reservation ``finalized``, and the eventual reconcile
+    no-oped, so the session's actual spend never landed on the reserved
+    counters. Draining the worker first lets the settlement finalize; the
+    subsequent release must be a no-op instead of zeroing the reservation."""
+    from litellm.litellm_core_utils import logging_worker as lw_module
+    from litellm.proxy import proxy_server as ps
+
+    reservation: Final = {
+        "reserved_cost": 0.55,
+        "input_cost": 0.0,
+        "finalized": False,
+        "entries": [{"counter_key": "spend:key:hashed-token", "reserved_cost": 0.55}],
+    }
+    user_api_key_dict: Final = UserAPIKeyAuth(api_key="sk-test", token="hashed-token")
+    user_api_key_dict.budget_reservation = reservation
+
+    real_cost: Final = 0.42
+
+    async def _reconcile_with_real_cost() -> None:
+        for entry in reservation["entries"]:
+            entry["applied_adjustment"] = real_cost - reservation["reserved_cost"]
+        reservation["finalized"] = True
+
+    worker: Final = lw_module.LoggingWorker()
+    worker.ensure_initialized_and_enqueue(_reconcile_with_real_cost())
+
+    release_call_count: Final = [0]
+
+    async def _tracking_release(*, budget_reservation: dict | None) -> None:
+        release_call_count[0] += 1
+        if budget_reservation is not None:
+            budget_reservation["finalized"] = True
+            for entry in budget_reservation.get("entries") or []:
+                entry["applied_adjustment"] = -reservation["reserved_cost"]
+
+    swap_worker = patch.object(lw_module, "GLOBAL_LOGGING_WORKER", worker)  # test-quality-ok: injects a real bounded worker so the drain-then-release ordering is observable
+    swap_release = patch(
+        "litellm.proxy.spend_tracking.budget_reservation.release_budget_reservation",
+        new=_tracking_release,
+    )  # test-quality-ok: observes whether the endpoint clobbered the reconciled reservation
+    try:
+        with swap_worker, swap_release:
+            await ps._release_realtime_budget_reservation(user_api_key_dict)
+    finally:
+        await worker.stop()
+
+    assert reservation["finalized"] is True
+    assert reservation["entries"][0]["applied_adjustment"] == pytest.approx(
+        real_cost - reservation["reserved_cost"]
+    ), (
+        "The async settlement's real-cost adjustment was clobbered by a "
+        "release-to-zero; the finally must wait for the queued settlement."
+    )
+    assert release_call_count[0] == 0, (
+        "release_budget_reservation ran after the async settlement finalized "
+        "the reservation; the finalized guard should have made it a no-op"
+    )
+
+
+@pytest.mark.asyncio
 async def test_release_or_invalidate_falls_back_to_invalidating_the_counters():
     """If releasing the reservation itself fails (e.g. the counter store is down),
     the reserved counters must be invalidated directly so the estimate does not
