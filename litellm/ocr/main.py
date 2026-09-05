@@ -51,7 +51,7 @@ class _PreparedOCRRequest:
     litellm_params: dict[str, object]
     effective_timeout: float | httpx.Timeout
     litellm_logging_obj: LiteLLMLoggingObj
-    litellm_call_id: str
+    litellm_call_id: str | None = None
 
 
 _RUST_OCR_PROVIDERS: Final = {
@@ -179,7 +179,7 @@ def _prepare_ocr_request(
         litellm_params=dict(litellm_params),
         effective_timeout=effective_timeout,
         litellm_logging_obj=litellm_logging_obj,
-        litellm_call_id=litellm_logging_obj.litellm_call_id,
+        litellm_call_id=litellm_call_id,
     )
 
 
