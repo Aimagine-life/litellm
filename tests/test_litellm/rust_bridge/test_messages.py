@@ -101,6 +101,7 @@ async def test_async_dispatch_awaits_python_fallback() -> None:
             custom_llm_provider="anthropic",
             extra_headers=None,
             timeout=None,
+            callback_adapter=MagicMock(),
         ),
         model="claude-sonnet-4-5",
         fallback=fallback,

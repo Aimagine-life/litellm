@@ -7,6 +7,7 @@ from typing import Final, Protocol, cast  # noqa: TID251  # runtime typing const
 import httpx
 
 from litellm.rust_bridge.bindings import UNCHANGED, Unchanged
+from litellm.rust_bridge.callbacks import OneShotCallbackHandle
 from litellm.rust_bridge.runtime import (
     BridgeErrorContext,
     EndpointDispatch,
@@ -27,6 +28,7 @@ class RustTranscription(Protocol):
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callback_adapter: OneShotCallbackHandle | None,
     ) -> dict[str, object]:
         raise NotImplementedError
 
@@ -42,6 +44,7 @@ class RustAtranscription(Protocol):
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callback_adapter: OneShotCallbackHandle | None,
     ) -> Awaitable[dict[str, object]]:
         raise NotImplementedError
 
@@ -56,6 +59,7 @@ class NativeTranscriptionRequest:
     extra_headers: dict[str, object] | None
     optional_params: dict[str, object]
     timeout: float | httpx.Timeout | None
+    callback_adapter: OneShotCallbackHandle | None = None
 
 
 _TRANSCRIPTION: Final = cast(  # cast-ok: generic classmethod loses the route Protocol parameters
@@ -127,6 +131,7 @@ def _call_transcription(
         extra_headers=request.extra_headers,
         optional_params=request.optional_params,
         timeout_seconds=timeout_to_seconds(request.timeout),
+        callback_adapter=request.callback_adapter,
     )
 
 
@@ -143,4 +148,5 @@ def _call_atranscription(
         extra_headers=request.extra_headers,
         optional_params=request.optional_params,
         timeout_seconds=timeout_to_seconds(request.timeout),
+        callback_adapter=request.callback_adapter,
     )

@@ -16,21 +16,48 @@ pub struct OcrHttpResponse {
     pub body: String,
 }
 
+pub struct OcrProviderRequest {
+    pub provider: String,
+    pub model: String,
+    pub call_id: String,
+    pub body: Value,
+    pub api_base: String,
+    pub headers: BTreeMap<String, String>,
+}
+
 #[tracing::instrument(target = "litellm::function_trace", level = "trace", skip_all)]
 pub async fn send_ocr_request<Observer>(
     request: RequestBuilder,
-    event: &ProviderPreCall,
+    input: OcrProviderRequest,
     observer: &mut Observer,
 ) -> Result<OcrHttpResponse, Error>
 where
     Observer: ProviderAttemptObserver,
     Observer::Error: std::fmt::Display,
 {
-    let response = match http_request(request).await {
+    let event = ProviderPreCall {
+        provider: input.provider,
+        model: input.model,
+        call_id: input.call_id,
+        trace_id: None,
+        attempt: 1,
+        started_at: epoch_seconds(),
+        request: serde_json::from_value(input.body).map_err(|error| {
+            Error::InvalidRequest(format!("OCR provider request must be an object: {error}"))
+        })?,
+        api_base: input.api_base,
+        headers: input.headers,
+    };
+    let body = match observer.pre_call(&event).await.map_err(callback_error)? {
+        CallbackDecision::Unchanged => Value::Object(event.request.clone().into_iter().collect()),
+        CallbackDecision::Replace { payload } => payload,
+        CallbackDecision::Reject { message, .. } => return Err(Error::InvalidRequest(message)),
+    };
+    let response = match http_request(request.json(&body)).await {
         Ok(response) => response,
         Err(error) => {
             let mapped = transport_error(error);
-            notify_error(observer, event, &mapped, "provider_request", true).await?;
+            notify_error(observer, &event, &mapped, "provider_request", true).await?;
             return Err(mapped);
         }
     };
@@ -40,7 +67,7 @@ where
         Ok(body) => body,
         Err(error) => {
             let mapped = transport_error(error);
-            notify_error(observer, event, &mapped, "response_body", true).await?;
+            notify_error(observer, &event, &mapped, "response_body", true).await?;
             return Err(mapped);
         }
     };
@@ -49,7 +76,7 @@ where
             status: status.as_u16(),
             body: truncate_error_body(&body),
         };
-        notify_error(observer, event, &error, "provider_response", true).await?;
+        notify_error(observer, &event, &error, "provider_response", true).await?;
         return Err(error);
     }
     let post_call = ProviderPostCall {

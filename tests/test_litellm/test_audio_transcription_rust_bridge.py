@@ -22,6 +22,7 @@ class SyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callback_adapter: object | None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -52,6 +53,7 @@ class AsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
+        callback_adapter: object | None,
     ) -> dict[str, object]:
         self.calls.append(
             {

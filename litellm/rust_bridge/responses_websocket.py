@@ -10,6 +10,7 @@ import httpx
 from websockets.exceptions import ConnectionClosedOK
 
 from .bindings import UNCHANGED, Unchanged
+from .callbacks import SessionCallbackHandle
 from .configuration import rust_enabled
 from .runtime import (
     AsyncEndpointDispatch,
@@ -34,6 +35,7 @@ class RustResponsesWebSocketConnection(Protocol):
         url: str,
         headers: dict[str, str],
         timeout_seconds: float | None,
+        callback_adapter: SessionCallbackHandle | None,
     ) -> RustResponsesWebSocket: ...
 
 
@@ -42,6 +44,7 @@ class NativeResponsesWebSocketRequest:
     url: str
     headers: dict[str, str]
     timeout: float | httpx.Timeout | None
+    callback_adapter: SessionCallbackHandle | None = None
 
 
 _RESPONSES_WEBSOCKET: Final = cast(  # cast-ok: generic classmethod loses the route Protocol parameter
@@ -107,4 +110,5 @@ async def _connect_responses_websocket(
         url=request.url,
         headers=request.headers,
         timeout_seconds=timeout_to_seconds(request.timeout),
+        callback_adapter=request.callback_adapter,
     )

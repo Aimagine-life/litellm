@@ -47,7 +47,10 @@ async def test_unregistered_route_uses_python_without_native_preparation() -> No
 async def test_injected_route_owns_one_provider_attempt() -> None:
     events: list[str] = []
 
-    async def native(request: Mapping[str, object]) -> TokenCountResponse:
+    async def native(
+        request: Mapping[str, object], callback_adapter: object | None
+    ) -> TokenCountResponse:
+        assert callback_adapter is None
         events.append(f"native:{request['model']}")
         return TokenCountResponse(
             total_tokens=5,

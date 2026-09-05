@@ -45,6 +45,7 @@ fn request_context_from_py(context: &Bound<'_, PyAny>) -> PyResult<LiteLlmReques
 fn prepare_chat_completions(
     inputs: ChatCompletionsInputs,
 ) -> PyResult<impl Future<Output = Result<ChatCompletionsResponse, Error>> + Send + 'static> {
+    let _ = inputs.callback_adapter;
     let messages = required_value("messages", inputs.messages, Value::is_array, "list")?;
     let optional_params = object_or_empty("optional_params", inputs.optional_params)?;
     let options = RouteOptions::from_python(RouteOptionsInputs {
@@ -100,6 +101,7 @@ bridge_route! {
         #[pyo3(from_py_with = litellm_python_interop::from_py)]
         extra_headers: Option<serde_json::Value>,
         timeout_seconds: Option<f64>,
+        callback_adapter: Option<pyo3::Py<pyo3::PyAny>>,
     },
     prepare = prepare_chat_completions,
     errors = chat_completions_error_to_pyerr,

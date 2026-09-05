@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Final, Protocol, cast  # noqa: TID251  # runtime typing constructs
 
 from litellm.rust_bridge.bindings import UNCHANGED, Unchanged
+from litellm.rust_bridge.callbacks import OneShotCallbackHandle
 from litellm.rust_bridge.configuration import rust_enabled
 from litellm.rust_bridge.runtime import AsyncEndpointDispatch, BridgeErrorContext, identity
 from litellm.types.utils import TokenCountResponse
@@ -14,12 +15,14 @@ class RustProviderCountTokens(Protocol):
     def __call__(
         self,
         request: Mapping[str, object],
+        callback_adapter: OneShotCallbackHandle | None,
     ) -> Awaitable[TokenCountResponse]: ...
 
 
 @dataclass(frozen=True, slots=True)
 class NativeProviderCountTokensRequest:
     body: Mapping[str, object]
+    callback_adapter: OneShotCallbackHandle | None = None
 
 
 _PROVIDER_COUNT_TOKENS: Final = cast(
@@ -66,4 +69,4 @@ def _call_provider_count_tokens(
     native: RustProviderCountTokens,
     request: NativeProviderCountTokensRequest,
 ) -> Awaitable[TokenCountResponse]:
-    return native(request.body)
+    return native(request.body, callback_adapter=request.callback_adapter)

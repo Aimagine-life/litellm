@@ -14,6 +14,7 @@ fn prepare_ocr(
     inputs: OcrInputs,
     context: PythonCallContext<'_>,
 ) -> PyResult<impl Future<Output = Result<Value, Error>> + Send + 'static> {
+    let _ = inputs.callback_adapter;
     let document = inputs.document;
     let options = RouteOptions::from_python(RouteOptionsInputs {
         model: inputs.model,

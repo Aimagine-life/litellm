@@ -17,7 +17,7 @@ class PreCallArguments(TypedDict):
 
 class ProviderLogging(Protocol):
     @property
-    def model_call_details(self) -> MutableMapping[str, object]: ...
+    def model_call_details(self) -> MutableMapping[str, object]: ...  # mutable-ok: legacy logger stores provider events
 
     def pre_call(self, *, input: object, api_key: str | None, additional_args: PreCallArguments) -> None: ...
 
