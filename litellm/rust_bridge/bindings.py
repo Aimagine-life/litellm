@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Final, Generic, TypeVar, cast  # noqa: TID251  # runtime typing constructs
 
-from .loader import get_native_bridge, native_route_ready
+from .loader import get_native_bridge
 
 BindingT = TypeVar("BindingT")
 
@@ -46,8 +46,6 @@ class NativeBinding(Generic[BindingT]):
     def load(self) -> BindingT | None:
         if not isinstance(self._override, _Unset):
             return self._override
-        if not native_route_ready(self._route, frozenset({"callbacks"})):
-            return None
         native: Final = get_native_bridge()
         if native is None:
             return None

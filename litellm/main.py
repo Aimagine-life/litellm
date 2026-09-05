@@ -5145,11 +5145,6 @@ def _dispatch_chat_completion(ctx: _CompletionDispatchContext) -> _CompletionDis
     )
     raw_request_override: Final = ctx.litellm_params.get("rust")
     request_override: Final = raw_request_override if isinstance(raw_request_override, bool) else None
-    callback_adapter: Final = bridge.ChatCompletionsCallbackHandle(
-        logging_obj=ctx.logging,
-        messages=ctx.messages,
-        api_key=ctx.api_key or "",
-    )
     optional_params: Final = {**ctx.optional_params, "stream": ctx.stream}  # mutable-ok: native request payload
 
     def prepare_native() -> bridge.NativeChatCompletionsRequest:
@@ -5163,7 +5158,6 @@ def _dispatch_chat_completion(ctx: _CompletionDispatchContext) -> _CompletionDis
             extra_headers=ctx.extra_headers,
             timeout=ctx.timeout if not isinstance(ctx.timeout, str) else None,
             request_context=request_context,
-            callback_adapter=callback_adapter,
         )
 
     if ctx.acompletion:

@@ -21,7 +21,6 @@ def test_binding_loads_only_valid_native_attributes(
     expected: int | None,
 ) -> None:
     monkeypatch.setattr(bindings, "get_native_bridge", lambda: native)
-    monkeypatch.setattr(bindings, "native_route_ready", lambda _route, _capabilities: native is not None)
     binding: Final = bindings.NativeBinding(
         "test", "route", validate=lambda value: value if isinstance(value, int) else None
     )
@@ -39,7 +38,6 @@ def test_binding_loads_only_valid_native_attributes(
 )
 def test_callable_binding_rejects_non_callables(monkeypatch: pytest.MonkeyPatch, value: object) -> None:
     monkeypatch.setattr(bindings, "get_native_bridge", lambda: SimpleNamespace(route=value))
-    monkeypatch.setattr(bindings, "native_route_ready", lambda _route, _capabilities: True)
     binding: Final[bindings.NativeBinding[object]] = bindings.NativeBinding.native("test", "route")
 
     assert binding.load() is None
@@ -53,7 +51,6 @@ def test_callable_binding_resolves_override_and_reset(monkeypatch: pytest.Monkey
         return "replacement"
 
     monkeypatch.setattr(bindings, "get_native_bridge", lambda: SimpleNamespace(route=native_route))
-    monkeypatch.setattr(bindings, "native_route_ready", lambda _route, _capabilities: True)
     binding: Final[bindings.NativeBinding[object]] = bindings.NativeBinding.native("test", "route")
 
     assert binding.load() is native_route
@@ -63,18 +60,6 @@ def test_callable_binding_resolves_override_and_reset(monkeypatch: pytest.Monkey
     assert binding.load() is replacement
     binding.reset()
     assert binding.load() is native_route
-
-
-def test_unregistered_callable_cannot_activate_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    def native_route() -> str:
-        return "native"
-
-    monkeypatch.setattr(bindings, "get_native_bridge", lambda: SimpleNamespace(route=native_route))
-    monkeypatch.setattr(bindings, "native_route_ready", lambda _route, _capabilities: False)
-    binding: Final[bindings.NativeBinding[object]] = bindings.NativeBinding.native("test", "route")
-
-    assert binding.load() is None
-
 
 class _Declined(Exception):
     pass

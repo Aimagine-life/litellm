@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from litellm.rust_bridge import configuration, responses_websocket
-from litellm.rust_bridge.callbacks import SessionCallbackHandle
 
 
 class _FakeNativeConnection:
@@ -34,9 +33,7 @@ class _FakeNativeBridge:
         url: str,
         headers: dict[str, str],
         timeout_seconds: float | None,
-        callback_adapter: SessionCallbackHandle | None,
     ) -> _FakeNativeConnection:
-        assert callback_adapter is None
         return _FakeNativeConnection()
 
 

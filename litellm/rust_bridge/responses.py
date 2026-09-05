@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Final, Protocol, TypeVar, cast  # noqa: TID251  # runtime typing constructs
 
 from .bindings import UNCHANGED, Unchanged
-from .callbacks import OneShotCallbackHandle
 from .configuration import rust_enabled
 from .runtime import BridgeErrorContext, EndpointDispatch
 
@@ -13,21 +12,16 @@ ResultT = TypeVar("ResultT")
 
 
 class RustResponses(Protocol):
-    def __call__(
-        self, request: Mapping[str, object], callback_adapter: OneShotCallbackHandle | None
-    ) -> Mapping[str, object]: ...
+    def __call__(self, request: Mapping[str, object]) -> Mapping[str, object]: ...
 
 
 class RustAresponses(Protocol):
-    def __call__(
-        self, request: Mapping[str, object], callback_adapter: OneShotCallbackHandle | None
-    ) -> Awaitable[Mapping[str, object]]: ...
+    def __call__(self, request: Mapping[str, object]) -> Awaitable[Mapping[str, object]]: ...
 
 
 @dataclass(frozen=True, slots=True)
 class NativeResponsesRequest:
     body: Mapping[str, object]
-    callback_adapter: OneShotCallbackHandle | None = None
 
 
 _RESPONSES: Final = cast(  # cast-ok: generic classmethod loses the route Protocol parameters
@@ -101,11 +95,11 @@ async def adispatch_responses(
 
 
 def _call_responses(native: RustResponses, request: NativeResponsesRequest) -> Mapping[str, object]:
-    return native(request.body, callback_adapter=request.callback_adapter)
+    return native(request.body)
 
 
 def _call_aresponses(
     native: RustAresponses,
     request: NativeResponsesRequest,
 ) -> Awaitable[Mapping[str, object]]:
-    return native(request.body, callback_adapter=request.callback_adapter)
+    return native(request.body)

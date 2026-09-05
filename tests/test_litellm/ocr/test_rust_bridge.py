@@ -10,7 +10,6 @@ import pytest
 import litellm
 from litellm.llms.base_llm.ocr.transformation import OCRResponse
 from litellm.rust_bridge import bindings, configuration
-from litellm.rust_bridge.callbacks import OneShotCallbackHandle
 
 # `litellm/__init__.py` does `from .ocr.main import *`, which binds the `ocr`
 # function onto `litellm.ocr` and shadows the submodule, so import the modules
@@ -54,7 +53,6 @@ class RecordingBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
-        callback_adapter: OneShotCallbackHandle | None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -66,7 +64,6 @@ class RecordingBridge:
                 "extra_headers": extra_headers,
                 "optional_params": optional_params,
                 "timeout_seconds": timeout_seconds,
-                "callback_adapter": callback_adapter,
             }
         )
         return dict(FAKE_OCR_RESPONSE)
@@ -88,7 +85,6 @@ class RecordingAsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
-        callback_adapter: OneShotCallbackHandle | None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -100,7 +96,6 @@ class RecordingAsyncBridge:
                 "extra_headers": extra_headers,
                 "optional_params": optional_params,
                 "timeout_seconds": timeout_seconds,
-                "callback_adapter": callback_adapter,
             }
         )
         return dict(FAKE_OCR_RESPONSE)
@@ -117,7 +112,6 @@ class RaisingBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
-        callback_adapter: OneShotCallbackHandle | None,
     ) -> dict[str, object]:
         raise RuntimeError("bridge failed")
 
@@ -137,7 +131,6 @@ class RaisingAsyncBridge:
         extra_headers: dict[str, object] | None,
         optional_params: dict[str, object],
         timeout_seconds: float | None,
-        callback_adapter: OneShotCallbackHandle | None,
     ) -> dict[str, object]:
         raise RuntimeError("bridge failed")
 
@@ -297,7 +290,6 @@ def test_bridge_wrapper_forwards_prepared_args_and_wraps_response():
         },
         "optional_params": {"include_image_base64": True, "pages": [0]},
         "timeout_seconds": 12.5,
-        "callback_adapter": None,
     }
 
 
@@ -337,7 +329,6 @@ async def test_bridge_wrapper_forwards_prepared_async_args_and_wraps_response():
         "extra_headers": None,
         "optional_params": {"vertex_project": "project-1"},
         "timeout_seconds": 42.0,
-        "callback_adapter": None,
     }
 
 
@@ -373,7 +364,6 @@ def test_run_rust_ocr_prepares_request_and_wraps_response():
         },
         "optional_params": {"include_image_base64": True},
         "timeout_seconds": 12.5,
-        "callback_adapter": None,
     }
 
 

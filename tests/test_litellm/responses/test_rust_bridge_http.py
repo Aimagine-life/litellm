@@ -6,7 +6,6 @@ import pytest
 
 import litellm
 from litellm.rust_bridge import responses
-from litellm.rust_bridge.callbacks import OneShotCallbackHandle
 from litellm.types.llms.openai import ResponsesAPIResponse
 
 
@@ -25,11 +24,7 @@ class RecordingResponses:
     def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
 
-    def __call__(
-        self,
-        request: Mapping[str, object],
-        callback_adapter: OneShotCallbackHandle | None,
-    ) -> dict[str, object]:
+    def __call__(self, request: Mapping[str, object]) -> dict[str, object]:
         self.requests.append(dict(request))
         return _response_payload()
 
@@ -38,11 +33,7 @@ class RecordingAresponses:
     def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
 
-    async def __call__(
-        self,
-        request: Mapping[str, object],
-        callback_adapter: OneShotCallbackHandle | None,
-    ) -> dict[str, object]:
+    async def __call__(self, request: Mapping[str, object]) -> dict[str, object]:
         self.requests.append(dict(request))
         return _response_payload()
 

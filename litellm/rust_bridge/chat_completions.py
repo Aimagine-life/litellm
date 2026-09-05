@@ -2,27 +2,22 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol, cast  # noqa: TID251  # runtime typing constructs
 
 import httpx
-from pydantic import TypeAdapter
 
-from ..litellm_core_utils.litellm_logging import Logging
 from ..litellm_core_utils.llm_response_utils.convert_dict_to_response import (
     convert_to_model_response_object,  # pyright: ignore[reportUnknownVariableType]  # legacy converter is untyped
 )
 from ..types.utils import ModelResponse
 from .bindings import UNCHANGED, Unchanged
-from .callbacks import CallbackDecision, OneShotCallbackHandle
 from .configuration import rust_enabled
 from .runtime import BridgeErrorContext, EndpointDispatch
 from .timeouts import timeout_to_seconds
 
 RUST_RESPONSE_HEADER: Final = "x-litellm-rust"
-_EVENT_ADAPTER: Final = TypeAdapter(Mapping[str, object])
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +38,6 @@ class NativeChatCompletionsRequest:
     extra_headers: Mapping[str, object] | None
     timeout: float | httpx.Timeout | None
     request_context: NativeChatContext
-    callback_adapter: OneShotCallbackHandle
 
 
 class RustChatCompletions(Protocol):
@@ -59,7 +53,6 @@ class RustChatCompletions(Protocol):
         extra_headers: Mapping[str, object] | None,
         timeout_seconds: float | None,
         request_context: NativeChatContext,
-        callback_adapter: OneShotCallbackHandle,
     ) -> Mapping[str, object]: ...
 
 
@@ -76,47 +69,7 @@ class RustAchatCompletions(Protocol):
         extra_headers: Mapping[str, object] | None,
         timeout_seconds: float | None,
         request_context: NativeChatContext,
-        callback_adapter: OneShotCallbackHandle,
     ) -> Awaitable[Mapping[str, object]]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class ChatCompletionsCallbackHandle:
-    logging_obj: Logging
-    messages: Sequence[object]
-    api_key: str
-
-    def pre_call(self, payload: object, /) -> CallbackDecision:
-        event: Final = _EVENT_ADAPTER.validate_python(payload)
-        request: Final = event.get("request", event)
-        headers: Final = event.get("headers", {})
-        api_base: Final = event.get("api_base", event.get("url", ""))
-        self.logging_obj.pre_call(  # pyright: ignore[reportUnknownMemberType]  # legacy logger is untyped
-            input=self.messages,
-            api_key=self.api_key,
-            additional_args={  # mutable-ok: legacy logger accepts a mutable payload
-                "complete_input_dict": request if isinstance(request, Mapping) else event,
-                "api_base": api_base if isinstance(api_base, str) else "",
-                "headers": headers if isinstance(headers, Mapping) else {},  # mutable-ok: empty logging headers
-            },
-        )
-        return {"action": "unchanged"}
-
-    def post_call(self, payload: object, /) -> CallbackDecision:
-        event: Final = _EVENT_ADAPTER.validate_python(payload)
-        response: Final = event.get("response", event)
-        self.logging_obj.post_call(  # pyright: ignore[reportUnknownMemberType]  # legacy logger is untyped
-            input=self.messages,
-            api_key=self.api_key,
-            original_response=response if isinstance(response, str) else json.dumps(response),
-        )
-        return {"action": "unchanged"}
-
-    def error(self, payload: object, /) -> None:
-        event: Final = _EVENT_ADAPTER.validate_python(payload)
-        self.logging_obj.model_call_details["provider_error"] = dict(  # mutable-ok: logger stores mutable details
-            event
-        )
 
 
 _CHAT: Final = cast(  # cast-ok: generic classmethod loses the route Protocol parameters
@@ -219,7 +172,6 @@ def _call_chat_completions(
         extra_headers=request.extra_headers,
         timeout_seconds=timeout_to_seconds(request.timeout),
         request_context=request.request_context,
-        callback_adapter=request.callback_adapter,
     )
 
 
@@ -237,5 +189,4 @@ def _call_achat_completions(
         extra_headers=request.extra_headers,
         timeout_seconds=timeout_to_seconds(request.timeout),
         request_context=request.request_context,
-        callback_adapter=request.callback_adapter,
     )
